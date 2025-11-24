@@ -4,6 +4,7 @@ import os
 import time
 from ctypes import POINTER, c_char_p, c_int, cdll
 
+import pyinstrument
 from rich.padding import Padding
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -31,9 +32,8 @@ def find_csv_files() -> list[str]:
     return full_paths
 
 
-def create_zip_with_python(
-    csv_file_paths: list[str], zip_filename: str
-) -> tuple[str, str, str]:
+@pyinstrument.profile
+def create_zip_with_python(csv_file_paths: list[str], zip_filename: str) -> tuple[str, str, str]:
     python_start_time = time.perf_counter()
     append_files_to_zip_file(csv_file_paths, zip_filename)
     time_taken = f"{time.perf_counter() - python_start_time:.2f}"
@@ -49,9 +49,8 @@ def create_zip_with_python(
     )
 
 
-def create_zip_with_go(
-    csv_file_paths: list[str], zip_filename: str
-) -> tuple[str, str, str]:
+@pyinstrument.profile
+def create_zip_with_go(csv_file_paths: list[str], zip_filename: str) -> tuple[str, str, str]:
     full_paths = [p.encode() for p in csv_file_paths]
     c_file_paths = (c_char_p * len(full_paths))(*full_paths)
     zip_file_path = f"{os.getcwd()}/{zip_filename}".encode()
@@ -97,13 +96,17 @@ if __name__ == "__main__":
         type=int,
         default=3,
     )
+    parser.add_argument(
+        "-st",
+        "--skip-table",
+        help="Skip creating the results table at the end",
+        action="store_true",
+    )
     args = parser.parse_args()
 
     print(f"Running {args.iterations} iterations of each zip benchmark")
 
-    data: list[tuple[str, str, str]] = [
-        ("Language", "Time taken (seconds)", "Zip file size (MB)")
-    ]
+    data: list[tuple[str, str, str]] = [("Language", "Time taken (seconds)", "Zip file size (MB)")]
     files = find_csv_files()
 
     print("\nRunning Python benchmarks")
@@ -116,16 +119,18 @@ if __name__ == "__main__":
         _lang, _time, _size = create_zip_with_go(files, f"zipped_go_{i}.zip")
         data.append((_lang, _time, _size))
 
-    class TableApp(App):
-        def compose(self) -> ComposeResult:
-            yield DataTable()
+    if not args.skip_table:
 
-        def on_mount(self) -> None:
-            table = self.query_one(DataTable)
-            table.add_columns(*data[0])
-            for row in data[1:]:
-                styled_row = [Padding(Text(str(cell)), (0, 1)) for cell in row]
-                table.add_row(*styled_row)
+        class TableApp(App):
+            def compose(self) -> ComposeResult:
+                yield DataTable()
 
-    app = TableApp()
-    app.run()
+            def on_mount(self) -> None:
+                table = self.query_one(DataTable)
+                table.add_columns(*data[0])
+                for row in data[1:]:
+                    styled_row = [Padding(Text(str(cell)), (0, 1)) for cell in row]
+                    table.add_row(*styled_row)
+
+        app = TableApp()
+        app.run()
